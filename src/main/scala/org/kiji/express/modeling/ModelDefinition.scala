@@ -374,9 +374,8 @@ object ModelDefinition {
   }
 
   def validateExtractScoreBindings(extractorClass: Class[_], scorerClass: Class[_]) {
-    if (classOf[Extractor].isAssignableFrom(extractorClass) &&
-        classOf[Scorer].isAssignableFrom(scorerClass)) {
-      val extractor = try {
+    def validateExtractorClassInstantiatable(extractorClass: Class[_]): Unit = {
+      try {
         extractorClass.newInstance()
       } catch {
         case e: ClassNotFoundException => {
@@ -384,7 +383,10 @@ object ModelDefinition {
               "your extractor class is on the classpath.")
         }
       }
-      val scorer = try {
+    }
+
+    def validateScorerClassInstantiatable(scorerClass: Class[_]): Unit = {
+      try {
         scorerClass.newInstance()
       } catch {
         case e: ClassNotFoundException => {
@@ -392,31 +394,60 @@ object ModelDefinition {
               "your scorer class is on the classpath.")
         }
       }
+    }
 
-      val extractorOutputFields: Fields = extractor
-          .asInstanceOf[Extractor]
-          .extractFn
-          .fields
-          ._2
-      val scorerInputFields: Fields = scorer
-          .asInstanceOf[Scorer]
-          .scoreFn
-          .fields
+    def validateExtractorTrait(extractorClass: Class[_]): Unit = {
+      if (!classOf[Extractor].isAssignableFrom(extractorClass)) {
+        throw new ValidationException("The extractor class must implement the Extractor trait.")
+      }
+    }
 
-      if (!extractorOutputFields.isResults()) {
-        val extractorOutputFieldNames: Set[String] = Tuples
-            .fieldsToSeq(extractorOutputFields)
-            .toSet
-        val scorerInputFieldNames: Seq[String] = Tuples
-            .fieldsToSeq(scorerInputFields)
+    def validateScorerTrait(scorerClass: Class[_]): Unit = {
+      if (!classOf[Scorer].isAssignableFrom(scorerClass)) {
+        throw new ValidationException("The scorer class must implement the Scorer trait.")
+      }
+    }
 
-        scorerInputFieldNames
-            .foreach { field =>
-              if (!extractorOutputFieldNames.contains(field)) {
-                throw new ValidationException("Scorer uses a field not output by Extractor: " +
-                    "\"%s\"".format(field))
+    if (classOf[Extractor].isAssignableFrom(extractorClass) &&
+        classOf[Scorer].isAssignableFrom(scorerClass)) {
+      val extractorScorerClassErrors =
+          catchError(validateExtractorTrait(extractorClass)) ++
+          catchError(validateScorerTrait(scorerClass)) ++
+          catchError(validateExtractorClassInstantiatable(extractorClass)) ++
+          catchError(validateScorerClassInstantiatable(scorerClass))
+
+      if (! extractorScorerClassErrors.isEmpty) {
+        throw new ValidationException(
+            ValidationException.messageWithCauses("", extractorScorerClassErrors.toSeq))
+      } else {
+        val extractor = extractorClass.newInstance()
+        val scorer = scorerClass.newInstance()
+
+        val extractorOutputFields: Fields = extractor
+            .asInstanceOf[Extractor]
+            .extractFn
+            .fields
+            ._2
+        val scorerInputFields: Fields = scorer
+            .asInstanceOf[Scorer]
+            .scoreFn
+            .fields
+
+        if (!extractorOutputFields.isResults()) {
+          val extractorOutputFieldNames: Set[String] = Tuples
+              .fieldsToSeq(extractorOutputFields)
+              .toSet
+          val scorerInputFieldNames: Seq[String] = Tuples
+              .fieldsToSeq(scorerInputFields)
+
+          scorerInputFieldNames
+              .foreach { field =>
+                if (!extractorOutputFieldNames.contains(field)) {
+                  throw new ValidationException("Scorer uses a field not output by Extractor: " +
+                      "\"%s\"".format(field))
+                }
               }
-            }
+        }
       }
     }
   }
