@@ -373,15 +373,47 @@ object ModelDefinition {
     }
   }
 
+  /**
+   * Verifies that a model definition's extractor class and scorer class can be instantiated.
+   *
+   * @param extractorClass to validate.
+   * @param scorerClass to validate.
+   */
+ def validateClassInstantiatables(extractorClass: Class[_], scorerClass: Class[_]): Unit = {
+    try {
+      extractorClass.newInstance()
+    } catch {
+      case e @ (_ : IllegalAccessException | _ : InstantiationException | 
+          _ : ExceptionInInitializerError | _ : SecurityException) => {
+        throw new ValidationException("Unable to create instance of extractor class. Make sure " +
+            "your extractor class is on the classpath.")
+      }
+    try {
+      scorerClass.newInstance()
+    } catch {
+      case e @ (_ : IllegalAccessException | _ : InstantiationException | 
+          _ : ExceptionInInitializerError | _ : SecurityException) => {
+        throw new ValidationException("Unable to create instance of scorer class. Make sure " +
+            "your scorer class is on the classpath.")
+      }
+
+    }
+  }
+
+
   def validateExtractScoreBindings(extractorClass: Class[_], scorerClass: Class[_]) {
+
+    /*
     def validateExtractorClassInstantiatable(extractorClass: Class[_]): Unit = {
       try {
         extractorClass.newInstance()
       } catch {
-        case e: ClassNotFoundException => {
+        case e @ (_ : IllegalAccessException | _ : InstantiationException | 
+            _ : ExceptionInInitializerError | _ : SecurityException) => {
           throw new ValidationException("Unable to create instance of extractor class. Make sure " +
               "your extractor class is on the classpath.")
         }
+
       }
     }
 
@@ -395,6 +427,7 @@ object ModelDefinition {
         }
       }
     }
+    */
 
     def validateExtractorTrait(extractorClass: Class[_]): Unit = {
       if (!classOf[Extractor].isAssignableFrom(extractorClass)) {
