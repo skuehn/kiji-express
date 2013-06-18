@@ -608,7 +608,7 @@ object ModelEnvironment {
    */
   def validateName(name: String) {
     if(name.isEmpty) {
-      throw new ValidationException("The name of the model environment can not be the empty " +
+      throw new ValidationException("The name of the model environment cannot be the empty " +
           "string.")
     } else if (!KijiNameValidator.isValidAlias(name)) {
       throw new ValidationException("The name \"%s\" is not valid. ".format(name) +
