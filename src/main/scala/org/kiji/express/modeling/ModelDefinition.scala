@@ -268,6 +268,7 @@ object ModelDefinition {
     }
   }
 
+  //TODO This should be the primary exception aggregator
   /**
    * Verifies that all fields in a model definition are valid. This validation method will
    * collect all validation errors into one exception.
@@ -289,7 +290,8 @@ object ModelDefinition {
             .flatMap { x => catchError(validateExtractorClass(x)) },
         scorerClass
             .flatMap { x => catchError(validateScorerClass(x)) },
-        catchError(validateExtractScoreBindings(extractorClass.get, scorerClass.get)))
+        catchError(validateClassInstantiatables(extractorClass, scorerClass)),
+        catchError(validateExtractScoreBindings(extractorClass.get, scorerClass.get))) //TODO
 
     // Throw an exception if there were any validation errors.
     val causes = errors.flatten
@@ -303,7 +305,7 @@ object ModelDefinition {
    *
    * @param protocolVersion to validate.
    */
-  def validateProtocolVersion(protocolVersion: ProtocolVersion) {
+  private[express] def validateProtocolVersion(protocolVersion: ProtocolVersion) {
     if (MAX_MODEL_DEF_VER.compareTo(protocolVersion) < 0) {
       val error = "\"%s\" is the maximum protocol version supported. ".format(MAX_MODEL_DEF_VER) +
           "The provided model definition is of protocol version: \"%s\"".format(protocolVersion)
@@ -322,7 +324,7 @@ object ModelDefinition {
    *
    * @param name to validate.
    */
-  def validateName(name: String) {
+  private[express] def validateName(name: String) {
     if (name.isEmpty) {
       throw new ValidationException("The name of the model definition cannot be the empty string.")
     } else if (!KijiNameValidator.isValidAlias(name)) {
@@ -337,7 +339,7 @@ object ModelDefinition {
    *
    * @param version string to validate.
    */
-  def validateVersion(version: String) {
+  private[express] def validateVersion(version: String) {
     if (!version.matches(VERSION_REGEX)) {
       val error = "Model definition version strings must match the regex " +
           "\"%s\" (1.0.0 would be valid).".format(VERSION_REGEX)
@@ -351,7 +353,7 @@ object ModelDefinition {
    *
    * @param extractorClass to validate.
    */
-  def validateExtractorClass(extractorClass: Class[_]) {
+  private[express] def validateExtractorClass(extractorClass: Class[_]) {
     if (!classOf[Extractor].isAssignableFrom(extractorClass)) {
       val error = "The class \"%s\" does not implement the Extractor trait."
           .format(extractorClass.getName)
@@ -365,7 +367,7 @@ object ModelDefinition {
    *
    * @param scorerClass to validate.
    */
-  def validateScorerClass(scorerClass: Class[_]) {
+  private[express] def validateScorerClass(scorerClass: Class[_]) {
     if (!classOf[Scorer].isAssignableFrom(scorerClass)) {
       val error = "The class \"%s\" does not implement the Scorer trait."
           .format(scorerClass.getName)
@@ -379,7 +381,8 @@ object ModelDefinition {
    * @param extractorClass to validate.
    * @param scorerClass to validate.
    */
- def validateClassInstantiatables(extractorClass: Class[_], scorerClass: Class[_]): Unit = {
+  private[express] def validateClassInstantiatables(
+      extractorClass: Class[_], scorerClass: Class[_]): Unit = {
     try {
       extractorClass.newInstance()
     } catch {
@@ -388,6 +391,7 @@ object ModelDefinition {
         throw new ValidationException("Unable to create instance of extractor class. Make sure " +
             "your extractor class is on the classpath.")
       }
+    }
     try {
       scorerClass.newInstance()
     } catch {
@@ -396,63 +400,11 @@ object ModelDefinition {
         throw new ValidationException("Unable to create instance of scorer class. Make sure " +
             "your scorer class is on the classpath.")
       }
-
     }
   }
 
-
   def validateExtractScoreBindings(extractorClass: Class[_], scorerClass: Class[_]) {
 
-    /*
-    def validateExtractorClassInstantiatable(extractorClass: Class[_]): Unit = {
-      try {
-        extractorClass.newInstance()
-      } catch {
-        case e @ (_ : IllegalAccessException | _ : InstantiationException | 
-            _ : ExceptionInInitializerError | _ : SecurityException) => {
-          throw new ValidationException("Unable to create instance of extractor class. Make sure " +
-              "your extractor class is on the classpath.")
-        }
-
-      }
-    }
-
-    def validateScorerClassInstantiatable(scorerClass: Class[_]): Unit = {
-      try {
-        scorerClass.newInstance()
-      } catch {
-        case e: ClassNotFoundException => {
-          throw new ValidationException("Unable to create instance of scorer class. Make sure " +
-              "your scorer class is on the classpath.")
-        }
-      }
-    }
-    */
-
-    def validateExtractorTrait(extractorClass: Class[_]): Unit = {
-      if (!classOf[Extractor].isAssignableFrom(extractorClass)) {
-        throw new ValidationException("The extractor class must implement the Extractor trait.")
-      }
-    }
-
-    def validateScorerTrait(scorerClass: Class[_]): Unit = {
-      if (!classOf[Scorer].isAssignableFrom(scorerClass)) {
-        throw new ValidationException("The scorer class must implement the Scorer trait.")
-      }
-    }
-
-    if (classOf[Extractor].isAssignableFrom(extractorClass) &&
-        classOf[Scorer].isAssignableFrom(scorerClass)) {
-      val extractorScorerClassErrors =
-          catchError(validateExtractorTrait(extractorClass)) ++
-          catchError(validateScorerTrait(scorerClass)) ++
-          catchError(validateExtractorClassInstantiatable(extractorClass)) ++
-          catchError(validateScorerClassInstantiatable(scorerClass))
-
-      if (! extractorScorerClassErrors.isEmpty) {
-        throw new ValidationException(
-            ValidationException.messageWithCauses("", extractorScorerClassErrors.toSeq))
-      } else {
         val extractor = extractorClass.newInstance()
         val scorer = scorerClass.newInstance()
 
@@ -481,7 +433,5 @@ object ModelDefinition {
                 }
               }
         }
-      }
-    }
   }
 }
