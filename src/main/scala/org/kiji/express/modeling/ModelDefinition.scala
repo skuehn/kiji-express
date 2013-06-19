@@ -290,8 +290,10 @@ object ModelDefinition {
         scorerClass
             .flatMap { x => catchError(validateScorerClass(x)) },
         catchError(validateClassInstantiatables(extractorClass, scorerClass)),
-        catchError(validateExtractorInput(extractorClass)),
-        catchError(validateExtractScoreBindings(extractorClass.get, scorerClass.get))) //TODO
+        catchError(validateExtractorInput(extractorClass)),  
+        scorerInputFieldNames()
+            .foreach { field => catchError(validateScorerInputInExtractorOutputs(
+            field, extractorOutputFieldNames())) })
 
     // Throw an exception if there were any validation errors.
     val causes = errors.flatten
@@ -416,30 +418,6 @@ object ModelDefinition {
   }
 
   /**
-   * Verifies that every input field specified by the scorer class in the model definition has
-   * a corresponding output field specified by the extractor class.
-   *
-   * @param extractorClass to validate.
-   * @param scorerClass to validate.
-   * @throws ValidationException if there are errors encountered while validating that the
-   * scorer class's input fields and the extractor class's output fields match each other.
-   */
-
-  //TODO will disappear, move foreach loop into validateModelDefinition
-  private[express] def validateExtractScoreBindings(
-      extractorClass: Class[_], scorerClass: Class[_]) {
-
-      scorerInputFieldNames.foreach { field =>
-        if (!extractorOutputFieldNames.contains(field)) {
-          throw new ValidationException("Scorer uses a field not output by Extractor: " +
-              "\"%s\"".format(field))
-        }
-      }
-    }
-
-  }
-
-  /**
   * Verifies that the extractor class has valid input fields.
   *
   * @param extractorClass to validate.
@@ -459,12 +437,12 @@ object ModelDefinition {
   }
 
   /**
-  * Provides a set of output fields from the provided extractor class.
+  * Provides a set of output field strings from the provided extractor class.
   *
   * @param extractorClass from which to extract output fields.
   * @return a set of the extractor's output field names.
   */
-  private[express] def extractorOutputs(extractorClass: Class[_]) {
+  private[express] def extractorOutputFieldNames(extractorClass: Class[_]) {
     val extractor = extractorClass.newInstance()
     val extractorFields: Fields = extractor
         .asInstanceOf[Extractor]
@@ -487,12 +465,12 @@ object ModelDefinition {
   }
 
   /**
-  * Provides a sequence of input fields from the provided scorer class.
+  * Provides a sequence of input field strings from the provided scorer class.
   *
   * @param scorerClass from which to extract input fields.
   * @return a set of the scorer's input field names.
   */
-  private[express] def scorerInputs(scorerClass: Class[_]) {
+  private[express] def scorerInputFieldNames(scorerClass: Class[_]) {
     val scorer = scorerClass.newInstance()
     val scorerInputFields: Fields = scorer
         .asInstanceOf[Scorer]
@@ -502,5 +480,23 @@ object ModelDefinition {
     val scorerInputFieldNames: Seq[String] = Tuples
         .fieldsToSeq(scorerInputFields)
   }
+
+  /**
+   * Verifies that a scorer input field also exists in a list of extractor output fields.
+   *
+   * @param scorerInputFieldName to validate.
+   * @param extractorOutputFieldNames to validate.
+   * @throws ValidationException if there are errors encountered while validating that a
+   * single scorer input field name exists among the extractor output field names.
+   */
+  private[express] def validateScorerInputInExtractorOutputs(
+      scorerInputFieldName: String, extractorOutputFieldNames: Set[String]) {
+    if (!extractorOutputFieldNames.contains(scorerInputFieldName)) {
+      throw new ValidationException("Scorer's input field " + scorerInputFieldName +
+      " does not match any extractor output fields.")
+    }
+  }
+
+
 
 }
