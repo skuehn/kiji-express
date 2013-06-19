@@ -289,11 +289,17 @@ object ModelDefinition {
             .flatMap { x => catchError(validateExtractorClass(x)) },
         scorerClass
             .flatMap { x => catchError(validateScorerClass(x)) },
-        catchError(validateClassInstantiatables(extractorClass, scorerClass)),
-        catchError(validateExtractorInput(extractorClass)),  
-        scorerInputFieldNames()
-            .foreach { field => catchError(validateScorerInputInExtractorOutputs(
-            field, extractorOutputFieldNames())) })
+        extractorClass
+            .flatMap { x => scorerClass
+            .flatMap { y => catchError(
+            validateClassInstantiatables(x, y)) } },
+        extractorClass
+            .flatMap { x => catchError(validateExtractorInput(x)) },  
+        extractorClass
+            .flatMap { x => scorerClass
+            .flatMap { y => scorerInputFieldNames(y)
+            .foreach { field => catchError(
+            validateScorerInputInExtractorOutputs(field, extractorOutputFieldNames(x))) } } } )
 
     // Throw an exception if there were any validation errors.
     val causes = errors.flatten
@@ -442,14 +448,18 @@ object ModelDefinition {
   * @param extractorClass from which to extract output fields.
   * @return a set of the extractor's output field names.
   */
-  private[express] def extractorOutputFieldNames(extractorClass: Class[_]) {
+  private[express] def extractorOutputFieldNames(extractorClass: Class[_]): Set[String] = {
     val extractor = extractorClass.newInstance()
-    val extractorFields: Fields = extractor
+    val extractorOutputFields: Fields = extractor
         .asInstanceOf[Extractor]
         .extractFn
         .fields
-    val extractorInputFields: Fields = extractorFields._1
-    val extractorOutputFields: Fields = extractorFields._2
+        ._1
+    val extractorInputFields: Fields = extractor
+        .asInstanceOf[Extractor]
+        .extractFn
+        .fields
+        ._2
 
     if (!extractorOutputFields.isResults()) {
       val extractorOutputFieldNames: Set[String] = Tuples
@@ -468,9 +478,9 @@ object ModelDefinition {
   * Provides a sequence of input field strings from the provided scorer class.
   *
   * @param scorerClass from which to extract input fields.
-  * @return a set of the scorer's input field names.
+  * @return a sequence of the scorer's input field names.
   */
-  private[express] def scorerInputFieldNames(scorerClass: Class[_]) {
+  private[express] def scorerInputFieldNames(scorerClass: Class[_]): Seq[String] = {
     val scorer = scorerClass.newInstance()
     val scorerInputFields: Fields = scorer
         .asInstanceOf[Scorer]
@@ -479,6 +489,8 @@ object ModelDefinition {
 
     val scorerInputFieldNames: Seq[String] = Tuples
         .fieldsToSeq(scorerInputFields)
+
+    return scorerInputFieldNames
   }
 
   /**
