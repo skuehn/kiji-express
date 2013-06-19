@@ -281,32 +281,42 @@ object ModelDefinition {
     val scorerClass = Option(definition.scorerClass)
 
     // Collect errors from the other validation steps.
+    // This express is constructing a sequence of optional values. Each argument to the factory
+    // method Seq(...) must be a single Option[ValidationException] that should go in the list.
     val errors: Seq[Option[ValidationException]] = Seq(
         catchError(validateProtocolVersion(definition.protocolVersion)),
         catchError(validateName(definition.name)),
         catchError(validateVersion(definition.version)),
-        extractorClass
-            .flatMap { x => catchError(validateExtractorClass(x)) },
-        scorerClass
-            .flatMap { x => catchError(validateScorerClass(x)) },
-        extractorClass
-            .flatMap { x => scorerClass
-            .flatMap { y => catchError(
-            validateClassInstantiatables(x, y)) } },
-        extractorClass
-            .flatMap { x => catchError(validateExtractorInput(x)) },  
-        extractorClass
-            .flatMap { x => scorerClass
-            .flatMap { y => scorerInputFieldNames(y)
-            .foreach { field => catchError(
-            validateScorerInputInExtractorOutputs(field, extractorOutputFieldNames(x))) } } } )
+        extractorClass.flatMap { x => catchError(validateExtractorClass(x)) },
+        scorerClass.flatMap { x => catchError(validateScorerClass(x)) },
+        extractorClass.flatMap { x =>
+          scorerClass.flatMap { y => catchError(validateClassInstantiatables(x, y)) }
+        },
+        extractorClass.flatMap { x => catchError(validateExtractorInput(x)) }
+    )
+    // Now let's accumulate another collection of errors, this time from field name validation.
+    val fieldMappingErrors = extractorClass.flatMap { x =>
+      scorerClass.map { y =>
+        scorerInputFieldNames(y).map { fieldName =>
+          catchError(validateScorerInputInExtractorOutputs(fieldName, extractorOutputFieldNames(x)))
+
+        }
+      }
+    }.getOrElse(Seq())
+
+    val allErrors = errors ++ fieldMappingErrors
+//        extractorClass.flatMap { x =>
+//          scorerClass.flatMap { y => scorerInputFieldNames(y)
+//            .map { field => catchError(
+//            validateScorerInputInExtractorOutputs(field, extractorOutputFieldNames(x))) } } } )
 
     // Throw an exception if there were any validation errors.
-    val causes = errors.flatten
+    val causes = allErrors.flatten
     if (!causes.isEmpty) {
       throw new ModelDefinitionValidationException(causes, VALIDATION_MESSAGE)
     }
   }
+
 
   /**
    * Verifies that a model definition's protocol version is supported.
@@ -406,7 +416,7 @@ object ModelDefinition {
     try {
       extractorClass.newInstance()
     } catch {
-      case e @ (_ : IllegalAccessException | _ : InstantiationException | 
+      case e @ (_ : IllegalAccessException | _ : InstantiationException |
           _ : ExceptionInInitializerError | _ : SecurityException) => {
         throw new ValidationException("Unable to create instance of extractor class. Make sure " +
             "your extractor class is on the classpath.")
@@ -415,7 +425,7 @@ object ModelDefinition {
     try {
       scorerClass.newInstance()
     } catch {
-      case e @ (_ : IllegalAccessException | _ : InstantiationException | 
+      case e @ (_ : IllegalAccessException | _ : InstantiationException |
           _ : ExceptionInInitializerError | _ : SecurityException) => {
         throw new ValidationException("Unable to create instance of scorer class. Make sure " +
             "your scorer class is on the classpath.")
@@ -436,7 +446,7 @@ object ModelDefinition {
         .extractFn
         .fields
         ._1
-    
+
     if (extractorInputFields.isAll()) {
       throw new ValidationException("Extractor uses All in input field, which is invalid.")
     }
@@ -462,13 +472,16 @@ object ModelDefinition {
         ._2
 
     if (!extractorOutputFields.isResults()) {
-      val extractorOutputFieldNames: Set[String] = Tuples
+      // This was changed because a val assignment is an expression of type unit,
+      // and we need to return an express of type Set[String]
+      Tuples
           .fieldsToSeq(extractorOutputFields)
           .toSet
     }
     else {
       // If Results is true, use the extractor's input fields as output.
-      val extractorOutputFieldNames: Set[String] = Tuples
+      // Same here.
+      Tuples
           .fieldsToSeq(extractorInputFields)
           .toSet
     }
