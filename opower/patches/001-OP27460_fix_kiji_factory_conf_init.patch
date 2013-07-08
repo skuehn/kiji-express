@@ -1,0 +1,146 @@
+diff --git a/src/main/scala/org/kiji/express/ExpressGenericTable.scala b/src/main/scala/org/kiji/express/ExpressGenericTable.scala
+index 4abaa916a6bd419287759d47be49600fdf875cab..a2d9e3a9a298f841707e1b42103a90fce1d5c17b 100644
+--- a/src/main/scala/org/kiji/express/ExpressGenericTable.scala
++++ b/src/main/scala/org/kiji/express/ExpressGenericTable.scala
+@@ -19,6 +19,7 @@
+ 
+ package org.kiji.express
+ 
++import org.apache.hadoop.conf.Configuration
+ import org.slf4j.Logger
+ import org.slf4j.LoggerFactory
+ 
+@@ -44,15 +45,17 @@ import org.kiji.schema.util.ResourceUtils
+  * to allow decoding a generic cell from a rowdata.
+  *
+  * @param tableUri of the table to represent.
++ * @param configuration the job configuration
+  * @param columns in this table that requested rows will include.
+  */
+ @ApiAudience.Private
+-private[express] final class ExpressGenericTable(tableUri: KijiURI, columns: Seq[KijiColumnName]) {
++private[express] final class ExpressGenericTable(tableUri: KijiURI, configuration: Configuration,
++                                                 columns: Seq[KijiColumnName]) {
+   private val logger: Logger = LoggerFactory.getLogger(classOf[ExpressGenericTable])
+ 
+   logger.debug("ExpressGenericTable being initialized for table %s and columns %s".format(
+       tableUri, columns))
+-  val kiji: Kiji = Kiji.Factory.open(tableUri)
++  val kiji: Kiji = Kiji.Factory.open(tableUri, configuration)
+   val schemaTable: KijiSchemaTable = kiji.getSchemaTable()
+ 
+   /** Mapping from column name to cell spec. */
+diff --git a/src/main/scala/org/kiji/express/KijiScheme.scala b/src/main/scala/org/kiji/express/KijiScheme.scala
+index 7b26d52c64c06fc26fa912ccb88ac46dd6cbc47a..551be19db94b601a533c45b3877314ca8f4301cf 100644
+--- a/src/main/scala/org/kiji/express/KijiScheme.scala
++++ b/src/main/scala/org/kiji/express/KijiScheme.scala
+@@ -138,7 +138,7 @@ private[express] class KijiScheme(
+     // Construct an instance of ExpressGenericTable to reuse across all calls to the source method.
+     val uri: KijiURI = KijiURI.newBuilder(tableUriProperty).build()
+     val columnNames = columns.values.map { column => column.getColumnName() }
+-    val expressGenericTable = new ExpressGenericTable(uri, columnNames.toSeq)
++    val expressGenericTable = new ExpressGenericTable(uri, flow.getConfigCopy, columnNames.toSeq)
+     // Set the context of the sourcecall to include the single instance of ExpressGenericTable
+     sourceCall.setContext(KijiSourceContext(
+         sourceCall.getInput().createValue(),
+@@ -247,9 +247,7 @@ private[express] class KijiScheme(
+     val uriString: String = flow.getConfigCopy().get(KijiConfKeys.KIJI_OUTPUT_TABLE_URI)
+     val uri: KijiURI = KijiURI.newBuilder(uriString).build()
+ 
+-    // TODO: CHOP-72 Check and see if Kiji.Factory.open should be passed the configuration object in
+-    //     flow.
+-    doAndRelease(Kiji.Factory.open(uri)) { kiji: Kiji =>
++    doAndRelease(Kiji.Factory.open(uri, flow.getConfigCopy)) { kiji: Kiji =>
+       doAndRelease(kiji.openTable(uri.getTable())) { table: KijiTable =>
+         // Set the sink context to an opened KijiTableWriter.
+         sinkCall.setContext(KijiSinkContext(table.openTableWriter(), table.getLayout))
+diff --git a/src/main/scala/org/kiji/express/KijiSource.scala b/src/main/scala/org/kiji/express/KijiSource.scala
+index 8465a96360f6c7c3d6ae6b0f88bc6b4669b2d806..6d26232d1dbee9750107de0b1cb22aaf493e6f85 100644
+--- a/src/main/scala/org/kiji/express/KijiSource.scala
++++ b/src/main/scala/org/kiji/express/KijiSource.scala
+@@ -41,6 +41,7 @@ import com.twitter.scalding.Read
+ import com.twitter.scalding.Source
+ import com.twitter.scalding.Test
+ import com.twitter.scalding.Write
++import org.apache.hadoop.conf.Configuration
+ import org.apache.hadoop.mapred.JobConf
+ import org.apache.hadoop.mapred.OutputCollector
+ import org.apache.hadoop.mapred.RecordReader
+@@ -345,7 +346,8 @@ object KijiSource {
+       doAndRelease(Kiji.Factory.open(uri)) { kiji: Kiji =>
+         doAndRelease(kiji.openTable(uri.getTable())) { table: KijiTable =>
+           val columnNames = columns.values.map { column => column.getColumnName() }
+-          val genericTable = new ExpressGenericTable(table.getURI, columnNames.toSeq)
++          val genericTable = new ExpressGenericTable(table.getURI, new Configuration,
++                                                     columnNames.toSeq)
+           doAndClose(table.openTableReader()) { reader: KijiTableReader =>
+             // We also want the entire timerange, so the test can inspect all data in the table.
+             val request: KijiDataRequest =
+diff --git a/src/main/scala/org/kiji/express/KijiTap.scala b/src/main/scala/org/kiji/express/KijiTap.scala
+index 047ecd572a37869adcc7e061135b05d7214c8e91..1ef90226da7e52fa0f79a9b4c8a0d030f9cbfc85 100644
+--- a/src/main/scala/org/kiji/express/KijiTap.scala
++++ b/src/main/scala/org/kiji/express/KijiTap.scala
+@@ -200,7 +200,7 @@ private[express] class KijiTap(
+   override def resourceExists(conf: JobConf): Boolean = {
+     val uri: KijiURI = KijiURI.newBuilder(tableUri).build()
+ 
+-    doAndRelease(Kiji.Factory.open(uri)) { kiji: Kiji =>
++    doAndRelease(Kiji.Factory.open(uri, conf)) { kiji: Kiji =>
+       kiji.getTableNames().contains(uri.getTable())
+     }
+   }
+diff --git a/src/main/scala/org/kiji/express/LocalKijiScheme.scala b/src/main/scala/org/kiji/express/LocalKijiScheme.scala
+index 9a45524268fce06d379ce7bde9ecb8205c33daef..b806fe7722ad8173983aa38e96d20afab57dd621 100644
+--- a/src/main/scala/org/kiji/express/LocalKijiScheme.scala
++++ b/src/main/scala/org/kiji/express/LocalKijiScheme.scala
+@@ -32,6 +32,7 @@ import cascading.tap.Tap
+ import cascading.tuple.Tuple
+ import cascading.tuple.TupleEntry
+ import com.google.common.base.Objects
++import org.apache.hadoop.conf.Configuration
+ import org.slf4j.Logger
+ import org.slf4j.LoggerFactory
+ 
+@@ -192,7 +193,7 @@ private[express] class LocalKijiScheme(
+               timestampField,
+               row,
+               context.tableUri,
+-              new ExpressGenericTable(context.tableUri, columnNames.toSeq))
++              new ExpressGenericTable(context.tableUri, new Configuration, columnNames.toSeq))
+ 
+       // If no fields were missing, set the result tuple and return from this method.
+       result match {
+diff --git a/src/main/scala/org/kiji/express/modeling/ExtractScoreProducer.scala b/src/main/scala/org/kiji/express/modeling/ExtractScoreProducer.scala
+index 3668e71f0266555985bafa213bf79f6dd17df730..93b660cca44080ec3d68ff736de82f4d357d8417 100644
+--- a/src/main/scala/org/kiji/express/modeling/ExtractScoreProducer.scala
++++ b/src/main/scala/org/kiji/express/modeling/ExtractScoreProducer.scala
+@@ -161,7 +161,7 @@ final class ExtractScoreProducer
+     if (_genericTable.isDefined) {
+       genericTable.close()
+     }
+-    _genericTable = Some(new ExpressGenericTable(uri, columns))
++    _genericTable = Some(new ExpressGenericTable(uri, conf, columns))
+ 
+     // Finish setting the conf object.
+     super.setConf(conf)
+diff --git a/src/test/scala/org/kiji/express/KijiSchemeSuite.scala b/src/test/scala/org/kiji/express/KijiSchemeSuite.scala
+index c3dcde530ec11587786c7db6583474e0df40161a..eb831a7ff7353b9c0d2659040a01305f4d3b202e 100644
+--- a/src/test/scala/org/kiji/express/KijiSchemeSuite.scala
++++ b/src/test/scala/org/kiji/express/KijiSchemeSuite.scala
+@@ -23,6 +23,7 @@ import org.apache.avro.generic.IndexedRecord
+ 
+ import cascading.tuple.Tuple
+ import cascading.tuple.TupleEntry
++import org.apache.hadoop.conf.Configuration
+ 
+ class KijiSchemeSuite extends KijiSuite {
+   test("putTuple and rowToTuple can write and read a generic AvroRecord.") {
+@@ -57,7 +58,7 @@ class KijiSchemeSuite extends KijiSuite {
+     val rowData =
+       reader.get(dummyEid.toJavaEntityId, KijiScheme.buildRequest(TimeRange.All, columns.values))
+     val columnNames = columns.values.map { column => column.getColumnName() }
+-    val expressGenericTable = new ExpressGenericTable(uri, columnNames.toSeq)
++    val expressGenericTable = new ExpressGenericTable(uri, new Configuration, columnNames.toSeq)
+     val readValue: Option[Tuple] = KijiScheme.rowToTuple(
+         columns,
+         sourceFields,
